@@ -1,0 +1,16 @@
+[package]
+name = "Argus"
+version = "0.1.0"
+edition = "2024"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.5.57", features = ["derive"] }
+frida = { version = "0.17.2", features = ["auto-download"] }
+tokio = { version = "1.52.3",features = ["full"]}
