@@ -1,66 +1,71 @@
 globalThis.Agent = {
   modules: {},
 
-  log(event, tag, extra = null) {
-    const record = {
+  log(event, tag, subject = null, data = {}) {
+    send({
+      schema: "argus.frida.v1",
       time: new Date().toISOString(),
-      event: event,
-      tag: tag,
-    };
-
-    if (extra !== null && extra !== undefined) {
-      record.extra = extra;
-    }
-
-    send(record);
+      event,
+      tag,
+      subject: subject || {
+        name: tag,
+        address: null,
+      },
+      data: data || {},
+    });
   },
+  apiSubject(moduleName, apiName, address = null) {
+    return {
+      name: `${moduleName}!${apiName}`,
+      address: address ? address.toString() : null,
+    };
+  },
+
+  moduleSubject(moduleName, address = null) {
+    return {
+      name: moduleName,
+      address: address ? address.toString() : null,
+    };
+  },
+
   collectArgs(args, spec) {
-    const items = [];
-
+    const items = {};
     for (const item of spec) {
-      const index = item.index;
-
-      items.push({
-        index: index,
-        name: item.name,
-        value: args[index].toString(),
-      });
+      items[item.name] = args[item.index].toString();
     }
-
     return items;
   },
 
-  init(tag, extra = null) {
-    this.log("init", tag, extra);
+  init(tag, subject = null, data = {}) {
+    this.log("init", tag, subject, data);
   },
 
-  register(tag, extra = null) {
-    this.log("register", tag, extra);
+  skip(tag, subject = null, data = {}) {
+    this.log("skip", tag, subject, data);
   },
 
-  collect(tag, args, spec, extra = null) {
-    this.log("collect", tag, {
-      ...(extra || {}),
+  register(tag, moduleName, apiName) {
+    this.log("register", tag, this.apiSubject(moduleName, apiName));
+  },
+  collect(tag, moduleName, apiName, caller, args, spec) {
+    this.log("collect", tag, this.apiSubject(moduleName, apiName, caller), {
       args: this.collectArgs(args, spec),
     });
   },
-
-  triggered(tag, extra = null) {
-    this.log("triggered", tag, extra);
+  triggered(tag, moduleName, apiName, caller, data = {}) {
+    this.log(
+      "triggered",
+      tag,
+      this.apiSubject(moduleName, apiName, caller),
+      data,
+    );
   },
-
-  patched(tag, extra = null) {
-    this.log("patched", tag, extra);
+  error(tag, subject, message, data = {}) {
+    this.log("error", tag, subject, {
+      message: String(message),
+      ...data,
+    });
   },
-
-  skip(tag, extra = null) {
-    this.log("skip", tag, extra);
-  },
-
-  error(tag, extra = null) {
-    this.log("error", tag, extra);
-  },
-
   initModules() {
     const names = ["ntdll.dll", "kernel32.dll", "kernelbase.dll", "d3d9.dll"];
 
@@ -70,12 +75,12 @@ globalThis.Agent = {
       if (m) {
         this.modules[name.toLowerCase()] = m;
 
-        this.init("bootstrap", {
+        this.init("bootstrap", this.moduleSubject(name, m.base), {
           moduleName: name,
           base: m.base.toString(),
         });
       } else {
-        this.skip("bootstrap", {
+        this.skip("bootstrap", this.moduleSubject(name), {
           moduleName: name,
         });
       }
@@ -94,7 +99,7 @@ globalThis.Agent = {
     if (m) {
       this.modules[key] = m;
 
-      this.init("bootstrap", {
+      this.init("bootstrap", this.moduleSubject(name, m.base), {
         moduleName: name,
         base: m.base.toString(),
         lateLoaded: true,
@@ -103,7 +108,7 @@ globalThis.Agent = {
       return m;
     }
 
-    this.skip("module", {
+    this.skip("module", this.moduleSubject(name), {
       moduleName: name,
     });
 
@@ -126,11 +131,16 @@ globalThis.Agent = {
     }
 
     if (!addr) {
-      this.error("export", {
-        moduleName: moduleName,
-        apiName: exportName,
-        api: `${moduleName}!${exportName}`,
-      });
+      this.error(
+        "export",
+        this.apiSubject(moduleName, exportName),
+        "export not found",
+        {
+          moduleName,
+          apiName: exportName,
+          api: `${moduleName}!${exportName}`,
+        },
+      );
 
       return null;
     }
@@ -146,8 +156,7 @@ globalThis.Agent = {
     try {
       return fn();
     } catch (e) {
-      this.error(tag, {
-        error: String(e),
+      this.error(tag, { name: tag, address: null }, e, {
         stack: e.stack || null,
       });
 
@@ -168,6 +177,6 @@ globalThis.Agent = {
 
 Agent.initModules();
 
-Agent.init("bootstrap", {
+Agent.init("bootstrap", null, {
   status: "initialized",
 });

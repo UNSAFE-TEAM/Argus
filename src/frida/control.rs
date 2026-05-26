@@ -8,15 +8,74 @@ use std::{
     time::Duration,
 };
 struct Handler;
+use serde::Deserialize;
+use serde_json::Value;
+
+#[derive(Debug, Deserialize)]
+struct FridaEnvelope {
+    #[serde(rename = "type")]
+    kind: String,
+    payload: ArgusMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct ArgusMessage {
+    schema: String,
+    time: String,
+    event: String,
+    tag: String,
+    subject: Subject,
+    data: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct Subject {
+    name: String,
+    address: Option<String>,
+}
 
 impl ScriptHandler for Handler {
     fn on_message(&mut self, message: Message, data: Option<Vec<u8>>) {
-        println!("[frida] {message:?}");
+        match parse_argus_message(&message) {
+            Ok(Some(msg)) => {
+                println!(
+                    "[{}][{}] {} @ {}",
+                    msg.event,
+                    msg.tag,
+                    msg.subject.name,
+                    msg.subject.address.as_deref().unwrap_or("-"),
+                );
 
-        if let Some(data) = data {
-            println!("[frida data] {data:?}");
+                if msg.event != "register" {
+                    println!("{}", msg.data);
+                }
+            }
+            Ok(None) => {
+                println!("[frida] {message:?}");
+
+                if let Some(data) = data {
+                    println!("[frida data] {data:?}");
+                }
+            }
+            Err(err) => {
+                println!("[frida parse error] {err}");
+                println!("[frida raw] {message:?}");
+            }
         }
     }
+}
+
+fn parse_argus_message(message: &Message) -> anyhow::Result<Option<ArgusMessage>> {
+    let Message::Other(value) = message else {
+        return Ok(None);
+    };
+
+    let Some(raw) = value.get("data").and_then(|v| v.as_str()) else {
+        return Ok(None);
+    };
+
+    let envelope: FridaEnvelope = serde_json::from_str(raw)?;
+    Ok(Some(envelope.payload))
 }
 
 pub fn run(command: Target) -> anyhow::Result<()> {

@@ -9,6 +9,8 @@ dependencies = [
  "anyhow",
  "clap",
  "frida",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
