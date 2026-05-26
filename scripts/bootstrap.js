@@ -66,6 +66,23 @@ globalThis.Agent = {
       ...data,
     });
   },
+  initMainModule() {
+    const m = Process.enumerateModules()[0];
+
+    if (!m) {
+      this.skip("bootstrap", this.moduleSubject("main"), {
+        reason: "main_module_not_found",
+      });
+      return;
+    }
+
+    this.init("bootstrap", this.moduleSubject(m.name, m.base), {
+      moduleName: m.name,
+      base: m.base.toString(),
+      size: String(m.size),
+      path: m.path,
+    });
+  },
   initModules() {
     const names = ["ntdll.dll", "kernel32.dll", "kernelbase.dll", "d3d9.dll"];
 
@@ -175,6 +192,7 @@ globalThis.Agent = {
   },
 };
 
+Agent.initMainModule();
 Agent.initModules();
 
 Agent.init("bootstrap", null, {

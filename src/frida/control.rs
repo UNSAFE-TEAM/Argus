@@ -38,18 +38,26 @@ impl ScriptHandler for Handler {
     fn on_message(&mut self, message: Message, data: Option<Vec<u8>>) {
         match parse_argus_message(&message) {
             Ok(Some(msg)) => {
-                println!(
-                    "[{}][{}] {} @ {}",
-                    msg.event,
-                    msg.tag,
-                    msg.subject.name,
-                    msg.subject.address.as_deref().unwrap_or("-"),
-                );
-
-                if msg.event != "register" {
-                    println!("{}", msg.data);
+                if msg.event == "register" {
+                    println!(
+                        "[{}][{}] {} @ {}",
+                        msg.event,
+                        msg.tag,
+                        msg.subject.name,
+                        msg.subject.address.as_deref().unwrap_or("-"),
+                    );
+                } else {
+                    println!(
+                        "[{}][{}] {} @ {} {}",
+                        msg.event,
+                        msg.tag,
+                        msg.subject.name,
+                        msg.subject.address.as_deref().unwrap_or("-"),
+                        msg.data,
+                    );
                 }
             }
+
             Ok(None) => {
                 println!("[frida] {message:?}");
 

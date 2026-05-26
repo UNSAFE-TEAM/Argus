@@ -13,19 +13,25 @@
 
     Interceptor.attach(addr, {
       onEnter(args) {
-        Agent.collect(TAG, args, ARG_SPEC, {
-          apiName: API_NAME,
-          moduleName: MODULE_NAME,
-        });
+        this.caller = this.returnAddress;
+
+        Agent.collect(
+          TAG,
+          MODULE_NAME,
+          API_NAME,
+          this.caller.toString(),
+          args,
+          ARG_SPEC,
+        );
 
         // Optional parsed fields
         // this.path = Agent.readUtf16(args[0]);
       },
 
       onLeave(retval) {
-        Agent.triggered(TAG, {
-          apiName: API_NAME,
-          moduleName: MODULE_NAME,
+        Agent.triggered(TAG, MODULE_NAME, API_NAME, this.caller.toString(), {
+          original: { return: retval.toString() },
+          current: { return: retval.toString() },
 
           // Optional parsed fields
           // path: this.path,
@@ -33,10 +39,6 @@
       },
     });
 
-    Agent.register(TAG, {
-      apiName: API_NAME,
-      moduleName: MODULE_NAME,
-      address: addr.toString(),
-    });
+    Agent.register(TAG, MODULE_NAME, API_NAME);
   });
 })();
