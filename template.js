@@ -8,7 +8,13 @@
     // { index: 1, name: "arg1" },
   ];
 
-  Agent.safeCall(TAG, () => {
+  let installed = false;
+
+  function install() {
+    if (installed) {
+      return;
+    }
+
     const addr = Agent.getExport(MODULE_NAME, API_NAME);
 
     Interceptor.attach(addr, {
@@ -39,6 +45,11 @@
       },
     });
 
+    installed = true;
     Agent.register(TAG, MODULE_NAME, API_NAME);
+  }
+
+  Agent.safeCall(TAG, () => {
+    Agent.whenModuleLoaded(MODULE_NAME, install);
   });
 })();

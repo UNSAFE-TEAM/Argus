@@ -20,6 +20,7 @@
   ];
 
   const hookedMethods = {};
+  let installedAddress = null;
 
   function hex(value) {
     return "0x" + value.toString(16);
@@ -95,18 +96,11 @@
     );
   }
 
-  Agent.safeCall(TAG, () => {
-    if (!Process.findModuleByName(MODULE_NAME)) {
-      Module.load(MODULE_NAME);
-    }
-
+  function install() {
     const addr = Agent.getExport(MODULE_NAME, API_NAME);
+    const key = addr.toString();
 
-    if (!addr) {
-      Agent.skip(TAG, Agent.apiSubject(MODULE_NAME, API_NAME), {
-        reason: "export_not_found",
-      });
-
+    if (installedAddress === key) {
       return;
     }
 
@@ -131,6 +125,11 @@
       },
     });
 
+    installedAddress = key;
     Agent.register(TAG, MODULE_NAME, API_NAME);
+  }
+
+  Agent.safeCall(TAG, () => {
+    Agent.whenModuleLoaded(MODULE_NAME, install);
   });
 })();

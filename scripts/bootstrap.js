@@ -1,5 +1,6 @@
 globalThis.Agent = {
   modules: {},
+  moduleCallbacks: {},
 
   log(event, tag, subject = null, data = {}) {
     send({
@@ -26,6 +27,21 @@ globalThis.Agent = {
       name: moduleName,
       address: address ? address.toString() : null,
     };
+  },
+
+  normalizeModuleName(name) {
+    return String(name || "")
+      .split("\\")
+      .pop()
+      .split("/")
+      .pop()
+      .toLowerCase();
+  },
+
+  hasModuleCallbacks(moduleName) {
+    const key = this.normalizeModuleName(moduleName);
+    const callbacks = this.moduleCallbacks[key];
+    return !!callbacks && callbacks.length > 0;
   },
 
   collectArgs(args, spec) {
@@ -104,20 +120,75 @@ globalThis.Agent = {
     }
   },
 
+  whenModuleLoaded(moduleName, callback) {
+    const key = this.normalizeModuleName(moduleName);
+    const existing = Process.findModuleByName(key);
+
+    if (existing) {
+      this.modules[key] = existing;
+      callback(existing);
+      return;
+    }
+
+    if (!this.moduleCallbacks[key]) {
+      this.moduleCallbacks[key] = [];
+    }
+
+    this.moduleCallbacks[key].push(callback);
+
+    this.skip("module", this.moduleSubject(key), {
+      moduleName: key,
+      reason: "pending_module_load",
+    });
+  },
+
+  notifyModuleLoaded(moduleName) {
+    const key = this.normalizeModuleName(moduleName);
+
+    if (!key) {
+      return;
+    }
+
+    const m = Process.findModuleByName(key);
+
+    if (!m) {
+      return;
+    }
+
+    this.modules[key] = m;
+
+    const callbacks = this.moduleCallbacks[key] || [];
+    delete this.moduleCallbacks[key];
+
+    if (callbacks.length === 0) {
+      return;
+    }
+
+    this.init("module", this.moduleSubject(m.name, m.base), {
+      moduleName: m.name,
+      base: m.base.toString(),
+      lateLoaded: true,
+    });
+
+    for (const callback of callbacks) {
+      this.safeCall(`module:${key}`, () => callback(m));
+    }
+  },
+
   getModule(name) {
-    const key = name.toLowerCase();
+    const key = this.normalizeModuleName(name);
 
     if (this.modules[key]) {
       return this.modules[key];
     }
 
-    const m = Process.findModuleByName(name);
+    const m = Process.findModuleByName(key);
 
     if (m) {
       this.modules[key] = m;
 
-      this.init("bootstrap", this.moduleSubject(name, m.base), {
-        moduleName: name,
+      this.init("bootstrap", this.moduleSubject(m.name, m.base), {
+        moduleName: m.name,
         base: m.base.toString(),
         lateLoaded: true,
       });
@@ -125,8 +196,8 @@ globalThis.Agent = {
       return m;
     }
 
-    this.skip("module", this.moduleSubject(name), {
-      moduleName: name,
+    this.skip("module", this.moduleSubject(key), {
+      moduleName: key,
     });
 
     return null;
@@ -134,9 +205,10 @@ globalThis.Agent = {
 
   getExport(moduleName, exportName) {
     let addr = null;
+    const normalizedModuleName = this.normalizeModuleName(moduleName);
 
     try {
-      const m = Process.findModuleByName(moduleName);
+      const m = Process.findModuleByName(normalizedModuleName);
 
       if (m && typeof m.findExportByName === "function") {
         addr = m.findExportByName(exportName);
@@ -150,12 +222,12 @@ globalThis.Agent = {
     if (!addr) {
       this.error(
         "export",
-        this.apiSubject(moduleName, exportName),
+        this.apiSubject(normalizedModuleName, exportName),
         "export not found",
         {
-          moduleName,
+          moduleName: normalizedModuleName,
           apiName: exportName,
-          api: `${moduleName}!${exportName}`,
+          api: `${normalizedModuleName}!${exportName}`,
         },
       );
 
@@ -167,6 +239,50 @@ globalThis.Agent = {
 
   mustGetExport(moduleName, exportName) {
     return Module.getExportByName(moduleName, exportName);
+  },
+
+  hookModuleLoader() {
+    const moduleName = "ntdll.dll";
+    const apiName = "LdrLoadDll";
+    const addr = this.getExport(moduleName, apiName);
+
+    if (!addr) {
+      return;
+    }
+
+    Interceptor.attach(addr, {
+      onEnter(args) {
+        this.caller = this.returnAddress;
+        this.dllName = Agent.readUnicodeString(args[2]);
+      },
+
+      onLeave(retval) {
+        const status = retval.toInt32();
+
+        if (status !== 0 || !this.dllName) {
+          return;
+        }
+
+        if (!Agent.hasModuleCallbacks(this.dllName)) {
+          return;
+        }
+
+        Agent.triggered(
+          "module_loader",
+          moduleName,
+          apiName,
+          this.caller.toString(),
+          {
+            original: { moduleName: Agent.normalizeModuleName(this.dllName) },
+            current: { moduleName: Agent.normalizeModuleName(this.dllName) },
+          },
+        );
+
+        Agent.notifyModuleLoaded(this.dllName);
+      },
+    });
+
+    this.register("module_loader", moduleName, apiName);
   },
 
   safeCall(tag, fn) {
@@ -190,10 +306,29 @@ globalThis.Agent = {
     if (!ptr || ptr.isNull()) return "";
     return ptr.readCString();
   },
+
+  readUnicodeString(ptrValue) {
+    if (!ptrValue || ptrValue.isNull()) return "";
+
+    try {
+      const length = ptrValue.readU16();
+      const bufferOffset = Process.pointerSize === 8 ? 8 : 4;
+      const buffer = ptrValue.add(bufferOffset).readPointer();
+
+      if (!buffer || buffer.isNull() || length === 0) {
+        return "";
+      }
+
+      return buffer.readUtf16String(length / 2);
+    } catch (_) {
+      return "";
+    }
+  },
 };
 
 Agent.initMainModule();
 Agent.initModules();
+Agent.hookModuleLoader();
 
 Agent.init("bootstrap", null, {
   status: "initialized",
