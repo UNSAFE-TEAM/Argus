@@ -39,13 +39,13 @@ pub enum ArgusEventKind {
     Other,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ArgsData {
-    pub args: std::collections::BTreeMap<String, String>,
-}
+// #[derive(Debug, Deserialize)]
+// pub struct ArgsData {
+//     pub args: std::collections::BTreeMap<String, String>,
+// }
 
-#[derive(Debug, Deserialize)]
-pub struct ChangeData {
-    pub original: std::collections::BTreeMap<String, String>,
-    pub current: std::collections::BTreeMap<String, String>,
-}
+// #[derive(Debug, Deserialize)]
+// pub struct ChangeData {
+//     pub original: std::collections::BTreeMap<String, String>,
+//     pub current: std::collections::BTreeMap<String, String>,
+// }

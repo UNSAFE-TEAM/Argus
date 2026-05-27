@@ -8,20 +8,24 @@ const YELLOW: &str = "\x1b[33m";
 const RED: &str = "\x1b[31m";
 const MAGENTA: &str = "\x1b[35m";
 
-pub fn print(event: &ArgusEvent) {
+// pub fn print(event: &ArgusEvent) {
+//     println!("{}", format(event));
+// }
+
+pub fn format(event: &ArgusEvent) -> String {
     let event_name = event_name(&event.event);
     let event_color = event_color(&event.event);
     let address = event.subject.address.as_deref().unwrap_or("-");
 
     match event.event {
         ArgusEventKind::Register => {
-            println!(
+            format!(
                 "{}[{}]{} [{}] {}",
-                event_color, event_name, RESET, event.tag, event.subject.name,
-            );
+                event_color, event_name, RESET, event.tag, event.subject.name
+            )
         }
         _ => {
-            println!(
+            format!(
                 "{}[{}]{} [{}] {}{} @ {}{} {}",
                 event_color,
                 event_name,
@@ -31,8 +35,8 @@ pub fn print(event: &ArgusEvent) {
                 DIM,
                 address,
                 RESET,
-                event.data,
-            );
+                event.data
+            )
         }
     }
 }

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{ArgGroup, Parser, ValueEnum};
 
 #[derive(Parser)]
@@ -29,6 +31,14 @@ pub struct Args {
     #[arg(short, long, value_enum, default_value_t = Output::Console)]
     output: Output,
 
+    /// Save the output to a file
+    #[arg(short, long)]
+    save: Option<PathBuf>,
+
+    /// Disable console output
+    #[arg(short, long)]
+    quiet: bool,
+
     /// Display help information
     #[arg(short, long, action = clap::ArgAction::Help)]
     pub help: Option<bool>,
@@ -52,6 +62,13 @@ pub enum Output {
 impl Args {
     pub fn output(&self) -> Output {
         self.output
+    }
+    pub fn save(&self) -> Option<PathBuf> {
+        self.save.clone()
+    }
+
+    pub fn quiet(&self) -> bool {
+        self.quiet
     }
     pub fn target(self) -> Target {
         if let Some(exec) = self.exec {
