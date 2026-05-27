@@ -1,4 +1,4 @@
-use clap::{ArgGroup, Parser};
+use clap::{ArgGroup, Parser, ValueEnum};
 
 #[derive(Parser)]
 #[command(name = "Argus", about = "Argus - Dynamic analysis tool based on Frida")]
@@ -25,6 +25,10 @@ pub struct Args {
     #[arg(short, long)]
     pid: Option<u32>,
 
+    /// Output mode selection
+    #[arg(short, long, value_enum, default_value_t = Output::Console)]
+    output: Output,
+
     /// Display help information
     #[arg(short, long, action = clap::ArgAction::Help)]
     pub help: Option<bool>,
@@ -40,7 +44,15 @@ pub enum Target {
     Pid(u32),
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum Output {
+    Console,
+    Jsonl,
+}
 impl Args {
+    pub fn output(&self) -> Output {
+        self.output
+    }
     pub fn target(self) -> Target {
         if let Some(exec) = self.exec {
             return Target::Exec(exec);
