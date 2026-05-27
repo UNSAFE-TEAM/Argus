@@ -1,0 +1,335 @@
+globalThis.Agent = {
+  modules: {},
+  moduleCallbacks: {},
+
+  log(event, tag, subject = null, data = {}) {
+    send({
+      schema: "argus.frida.v1",
+      time: new Date().toISOString(),
+      event,
+      tag,
+      subject: subject || {
+        name: tag,
+        address: null,
+      },
+      data: data || {},
+    });
+  },
+  apiSubject(moduleName, apiName, address = null) {
+    return {
+      name: `${moduleName}!${apiName}`,
+      address: address ? address.toString() : null,
+    };
+  },
+
+  moduleSubject(moduleName, address = null) {
+    return {
+      name: moduleName,
+      address: address ? address.toString() : null,
+    };
+  },
+
+  normalizeModuleName(name) {
+    return String(name || "")
+      .split("\\")
+      .pop()
+      .split("/")
+      .pop()
+      .toLowerCase();
+  },
+
+  hasModuleCallbacks(moduleName) {
+    const key = this.normalizeModuleName(moduleName);
+    const callbacks = this.moduleCallbacks[key];
+    return !!callbacks && callbacks.length > 0;
+  },
+
+  collectArgs(args, spec) {
+    const items = {};
+    for (const item of spec) {
+      items[item.name] = args[item.index].toString();
+    }
+    return items;
+  },
+
+  init(tag, subject = null, data = {}) {
+    this.log("init", tag, subject, data);
+  },
+
+  skip(tag, subject = null, data = {}) {
+    this.log("skip", tag, subject, data);
+  },
+
+  register(tag, moduleName, apiName) {
+    this.log("register", tag, this.apiSubject(moduleName, apiName));
+  },
+  collect(tag, moduleName, apiName, caller, args, spec) {
+    this.log("collect", tag, this.apiSubject(moduleName, apiName, caller), {
+      args: this.collectArgs(args, spec),
+    });
+  },
+  triggered(tag, moduleName, apiName, caller, data = {}) {
+    this.log(
+      "triggered",
+      tag,
+      this.apiSubject(moduleName, apiName, caller),
+      data,
+    );
+  },
+  error(tag, subject, message, data = {}) {
+    this.log("error", tag, subject, {
+      message: String(message),
+      ...data,
+    });
+  },
+  initMainModule() {
+    const m = Process.enumerateModules()[0];
+
+    if (!m) {
+      this.skip("bootstrap", this.moduleSubject("main"), {
+        reason: "main_module_not_found",
+      });
+      return;
+    }
+
+    this.init("bootstrap", this.moduleSubject(m.name, m.base), {
+      moduleName: m.name,
+      base: m.base.toString(),
+      size: String(m.size),
+      path: m.path,
+    });
+  },
+  initModules() {
+    const names = ["ntdll.dll", "kernel32.dll", "kernelbase.dll", "d3d9.dll"];
+
+    for (const name of names) {
+      const m = Process.findModuleByName(name);
+
+      if (m) {
+        this.modules[name.toLowerCase()] = m;
+
+        this.init("bootstrap", this.moduleSubject(name, m.base), {
+          moduleName: name,
+          base: m.base.toString(),
+        });
+      } else {
+        this.skip("bootstrap", this.moduleSubject(name), {
+          moduleName: name,
+        });
+      }
+    }
+  },
+
+  whenModuleLoaded(moduleName, callback) {
+    const key = this.normalizeModuleName(moduleName);
+    const existing = Process.findModuleByName(key);
+
+    if (existing) {
+      this.modules[key] = existing;
+      callback(existing);
+      return;
+    }
+
+    if (!this.moduleCallbacks[key]) {
+      this.moduleCallbacks[key] = [];
+    }
+
+    this.moduleCallbacks[key].push(callback);
+
+    this.skip("module", this.moduleSubject(key), {
+      moduleName: key,
+      reason: "pending_module_load",
+    });
+  },
+
+  notifyModuleLoaded(moduleName) {
+    const key = this.normalizeModuleName(moduleName);
+
+    if (!key) {
+      return;
+    }
+
+    const m = Process.findModuleByName(key);
+
+    if (!m) {
+      return;
+    }
+
+    this.modules[key] = m;
+
+    const callbacks = this.moduleCallbacks[key] || [];
+    delete this.moduleCallbacks[key];
+
+    if (callbacks.length === 0) {
+      return;
+    }
+
+    this.init("module", this.moduleSubject(m.name, m.base), {
+      moduleName: m.name,
+      base: m.base.toString(),
+      lateLoaded: true,
+    });
+
+    for (const callback of callbacks) {
+      this.safeCall(`module:${key}`, () => callback(m));
+    }
+  },
+
+  getModule(name) {
+    const key = this.normalizeModuleName(name);
+
+    if (this.modules[key]) {
+      return this.modules[key];
+    }
+
+    const m = Process.findModuleByName(key);
+
+    if (m) {
+      this.modules[key] = m;
+
+      this.init("bootstrap", this.moduleSubject(m.name, m.base), {
+        moduleName: m.name,
+        base: m.base.toString(),
+        lateLoaded: true,
+      });
+
+      return m;
+    }
+
+    this.skip("module", this.moduleSubject(key), {
+      moduleName: key,
+    });
+
+    return null;
+  },
+
+  getExport(moduleName, exportName) {
+    let addr = null;
+    const normalizedModuleName = this.normalizeModuleName(moduleName);
+
+    try {
+      const m = Process.findModuleByName(normalizedModuleName);
+
+      if (m && typeof m.findExportByName === "function") {
+        addr = m.findExportByName(exportName);
+      } else if (m && typeof m.getExportByName === "function") {
+        addr = m.getExportByName(exportName);
+      }
+    } catch (e) {
+      addr = null;
+    }
+
+    if (!addr) {
+      this.error(
+        "export",
+        this.apiSubject(normalizedModuleName, exportName),
+        "export not found",
+        {
+          moduleName: normalizedModuleName,
+          apiName: exportName,
+          api: `${normalizedModuleName}!${exportName}`,
+        },
+      );
+
+      return null;
+    }
+
+    return addr;
+  },
+
+  mustGetExport(moduleName, exportName) {
+    return Module.getExportByName(moduleName, exportName);
+  },
+
+  hookModuleLoader() {
+    const moduleName = "ntdll.dll";
+    const apiName = "LdrLoadDll";
+    const addr = this.getExport(moduleName, apiName);
+
+    if (!addr) {
+      return;
+    }
+
+    Interceptor.attach(addr, {
+      onEnter(args) {
+        this.caller = this.returnAddress;
+        this.dllName = Agent.readUnicodeString(args[2]);
+      },
+
+      onLeave(retval) {
+        const status = retval.toInt32();
+
+        if (status !== 0 || !this.dllName) {
+          return;
+        }
+
+        if (!Agent.hasModuleCallbacks(this.dllName)) {
+          return;
+        }
+
+        Agent.triggered(
+          "module_loader",
+          moduleName,
+          apiName,
+          this.caller.toString(),
+          {
+            original: { moduleName: Agent.normalizeModuleName(this.dllName) },
+            current: { moduleName: Agent.normalizeModuleName(this.dllName) },
+          },
+        );
+
+        Agent.notifyModuleLoaded(this.dllName);
+      },
+    });
+
+    this.register("module_loader", moduleName, apiName);
+  },
+
+  safeCall(tag, fn) {
+    try {
+      return fn();
+    } catch (e) {
+      this.error(tag, { name: tag, address: null }, e, {
+        stack: e.stack || null,
+      });
+
+      return null;
+    }
+  },
+
+  readUtf16(ptr) {
+    if (!ptr || ptr.isNull()) return "";
+    return ptr.readUtf16String();
+  },
+
+  readAnsi(ptr) {
+    if (!ptr || ptr.isNull()) return "";
+    return ptr.readCString();
+  },
+
+  readUnicodeString(ptrValue) {
+    if (!ptrValue || ptrValue.isNull()) return "";
+
+    try {
+      const length = ptrValue.readU16();
+      const bufferOffset = Process.pointerSize === 8 ? 8 : 4;
+      const buffer = ptrValue.add(bufferOffset).readPointer();
+
+      if (!buffer || buffer.isNull() || length === 0) {
+        return "";
+      }
+
+      return buffer.readUtf16String(length / 2);
+    } catch (_) {
+      return "";
+    }
+  },
+};
+
+Agent.initMainModule();
+Agent.initModules();
+Agent.hookModuleLoader();
+
+Agent.init("bootstrap", null, {
+  status: "initialized",
+});

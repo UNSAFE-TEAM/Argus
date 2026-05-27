@@ -132,13 +132,15 @@ fn load_script<'a>(session: &'a Session<'a>) -> anyhow::Result<frida::Script<'a>
 
 fn load_demo_scripts() -> anyhow::Result<String> {
     let scripts_dir = PathBuf::from("scripts");
-    let bootstrap_path = scripts_dir.join("bootstrap.js");
-    let mut script_paths = vec![bootstrap_path];
 
+    let mut scripts = Vec::new();
+
+    scripts.push(include_str!("../../bootstrap.js").to_string());
+
+    let mut script_paths = Vec::new();
     script_paths.extend(collect_js_scripts(&scripts_dir.join("anti_debug"))?);
     script_paths.extend(collect_js_scripts(&scripts_dir.join("anti_sandbox"))?);
 
-    let mut scripts = Vec::with_capacity(script_paths.len());
     for path in script_paths {
         let script = fs::read_to_string(&path)
             .with_context(|| format!("read script failed: {}", path.display()))?;
