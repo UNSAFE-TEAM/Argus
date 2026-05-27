@@ -4,100 +4,58 @@ use frida::{DeviceManager, Frida, Message, ScriptHandler, ScriptOption, Session,
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::OnceLock,
     thread,
     time::Duration,
 };
+
+use tokio::sync::mpsc;
+
+static OUTPUT_TX: OnceLock<mpsc::UnboundedSender<String>> = OnceLock::new();
+
 struct Handler;
-use serde::Deserialize;
-use serde_json::Value;
-
-#[derive(Debug, Deserialize)]
-struct FridaEnvelope {
-    #[serde(rename = "type")]
-    kind: String,
-    payload: ArgusMessage,
-}
-
-#[derive(Debug, Deserialize)]
-struct ArgusMessage {
-    schema: String,
-    time: String,
-    event: String,
-    tag: String,
-    subject: Subject,
-    data: Value,
-}
-
-#[derive(Debug, Deserialize)]
-struct Subject {
-    name: String,
-    address: Option<String>,
-}
 
 impl ScriptHandler for Handler {
     fn on_message(&mut self, message: Message, data: Option<Vec<u8>>) {
-        match parse_argus_message(&message) {
-            Ok(Some(msg)) => {
-                if msg.event == "register" {
-                    println!(
-                        "[{}][{}] {} @ {}",
-                        msg.event,
-                        msg.tag,
-                        msg.subject.name,
-                        msg.subject.address.as_deref().unwrap_or("-"),
-                    );
-                } else {
-                    println!(
-                        "[{}][{}] {} @ {} {}",
-                        msg.event,
-                        msg.tag,
-                        msg.subject.name,
-                        msg.subject.address.as_deref().unwrap_or("-"),
-                        msg.data,
-                    );
-                }
+        if let Some(raw) = extract_argus_raw_message(&message) {
+            if let Some(tx) = OUTPUT_TX.get() {
+                let _ = tx.send(raw);
             }
+            return;
+        }
 
-            Ok(None) => {
-                println!("[frida] {message:?}");
+        eprintln!("[frida] {message:?}");
 
-                if let Some(data) = data {
-                    println!("[frida data] {data:?}");
-                }
-            }
-            Err(err) => {
-                println!("[frida parse error] {err}");
-                println!("[frida raw] {message:?}");
-            }
+        if let Some(data) = data {
+            eprintln!("[frida data] {data:?}");
         }
     }
 }
-
-fn parse_argus_message(message: &Message) -> anyhow::Result<Option<ArgusMessage>> {
+fn extract_argus_raw_message(message: &Message) -> Option<String> {
     let Message::Other(value) = message else {
-        return Ok(None);
+        return None;
     };
 
-    let Some(raw) = value.get("data").and_then(|v| v.as_str()) else {
-        return Ok(None);
-    };
-
-    let envelope: FridaEnvelope = serde_json::from_str(raw)?;
-    Ok(Some(envelope.payload))
+    value
+        .get("data")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
 }
 
-pub fn run(command: Target) -> anyhow::Result<()> {
+pub fn run(command: Target, tx: mpsc::UnboundedSender<String>) -> anyhow::Result<()> {
+    let _ = OUTPUT_TX.set(tx);
+
     let frida = unsafe { Frida::obtain() };
     let manager = DeviceManager::obtain(&frida);
     let mut device = manager.get_local_device().unwrap();
-
     println!("[*] device: {:?}", device.get_name());
 
     match command {
         Target::Pid(pid) => {
             println!("[*] attaching pid: {pid}");
             let session = device.attach(pid).with_context(|| "attach failed")?;
-            load_script(session)?;
+            let _script = load_script(&session)?;
+            wait_for_process_exit(&device, pid);
         }
         Target::Exec(command) => {
             let (program, args) = split_exec_command(&command)?;
@@ -116,14 +74,29 @@ pub fn run(command: Target) -> anyhow::Result<()> {
             println!("[*] attaching pid: {pid}");
 
             let session = device.attach(pid).with_context(|| "attach failed")?;
-            load_script(session)?;
+            let _script = load_script(&session)?;
 
             device.resume(pid).with_context(|| "resume failed")?;
             println!("[*] process resumed");
+
+            wait_for_process_exit(&device, pid);
         }
     }
 
+    Ok(())
+}
+
+fn wait_for_process_exit(device: &frida::Device<'_>, pid: u32) {
     loop {
+        let exists = device
+            .enumerate_processes()
+            .iter()
+            .any(|process| process.get_pid() == pid);
+
+        if !exists {
+            break;
+        }
+
         thread::sleep(Duration::from_secs(1));
     }
 }
@@ -139,7 +112,7 @@ fn split_exec_command(command: &str) -> anyhow::Result<(String, Vec<String>)> {
     Ok((program, args))
 }
 
-fn load_script(session: Session<'_>) -> anyhow::Result<()> {
+fn load_script<'a>(session: &'a Session<'a>) -> anyhow::Result<frida::Script<'a>> {
     let mut script_options = ScriptOption::default();
     let script_source = load_demo_scripts()?;
 
@@ -154,7 +127,7 @@ fn load_script(session: Session<'_>) -> anyhow::Result<()> {
     script.load().with_context(|| "load script failed")?;
 
     println!("[*] script loaded");
-    Ok(())
+    Ok(script)
 }
 
 fn load_demo_scripts() -> anyhow::Result<String> {
