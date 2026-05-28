@@ -1,7 +1,7 @@
 (() => {
   const TAG = "category";
-  const API_NAME = "ApiName";
   const MODULE_NAME = "module.dll";
+  const API_NAME = "ApiName";
 
   const ARG_SPEC = [
     // { index: 0, name: "arg0" },
@@ -16,6 +16,9 @@
     }
 
     const addr = Agent.getExport(MODULE_NAME, API_NAME);
+    if (!addr) {
+      return;
+    }
 
     Interceptor.attach(addr, {
       onEnter(args) {

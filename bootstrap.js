@@ -307,6 +307,58 @@ globalThis.Agent = {
     return ptr.readCString();
   },
 
+  ptrKey(ptrValue) {
+    return ptrValue ? ptrValue.toString() : "";
+  },
+
+  containsAny(value, keywords) {
+    const normalized = String(value || "").toLowerCase();
+
+    for (const keyword of keywords) {
+      if (normalized.includes(String(keyword).toLowerCase())) {
+        return true;
+      }
+    }
+
+    return false;
+  },
+
+  readBstr(ptrValue) {
+    if (!ptrValue || ptrValue.isNull()) return "";
+
+    try {
+      return ptrValue.readUtf16String();
+    } catch (_) {
+      return "";
+    }
+  },
+
+  readString(ptrValue, wide) {
+    if (!ptrValue || ptrValue.isNull()) return "";
+
+    try {
+      return wide ? ptrValue.readUtf16String() : ptrValue.readAnsiString();
+    } catch (_) {
+      return "";
+    }
+  },
+
+  writeString(ptrValue, maxChars, value, wide) {
+    if (!ptrValue || ptrValue.isNull() || maxChars <= 0) {
+      return 0;
+    }
+
+    const text = String(value || "").slice(0, Math.max(0, maxChars - 1));
+
+    if (wide) {
+      ptrValue.writeUtf16String(text);
+    } else {
+      ptrValue.writeAnsiString(text);
+    }
+
+    return text.length;
+  },
+
   readUnicodeString(ptrValue) {
     if (!ptrValue || ptrValue.isNull()) return "";
 
@@ -323,6 +375,79 @@ globalThis.Agent = {
     } catch (_) {
       return "";
     }
+  },
+
+  comMethod(comObject, index) {
+    return comObject.readPointer().add(Process.pointerSize * index).readPointer();
+  },
+
+  isGuid(ptrValue, bytes) {
+    if (!ptrValue || ptrValue.isNull() || !bytes || bytes.length !== 16) {
+      return false;
+    }
+
+    try {
+      for (let i = 0; i < 16; i++) {
+        if (ptrValue.add(i).readU8() !== bytes[i]) {
+          return false;
+        }
+      }
+
+      return true;
+    } catch (_) {
+      return false;
+    }
+  },
+
+  sysAllocString(value) {
+    if (!this._sysAllocString) {
+      this._sysAllocString = new NativeFunction(
+        this.mustGetExport("oleaut32.dll", "SysAllocString"),
+        "pointer",
+        ["pointer"],
+      );
+    }
+
+    return this._sysAllocString(Memory.allocUtf16String(String(value || "")));
+  },
+
+  writeVariantU32(variant, value) {
+    if (!variant || variant.isNull()) return;
+
+    variant.writeU16(19);
+    variant.add(8).writeU32(value);
+  },
+
+  writeVariantU64(variant, value) {
+    if (!variant || variant.isNull()) return;
+
+    variant.writeU16(21);
+    variant.add(8).writeU64(new UInt64(String(value)));
+  },
+
+  writeVariantBstr(variant, value) {
+    if (!variant || variant.isNull()) return;
+
+    variant.writeU16(8);
+    variant.add(8).writePointer(this.sysAllocString(value));
+  },
+
+  writeVariantAuto(variant, value) {
+    if (!variant || variant.isNull()) return;
+
+    const vt = variant.readU16();
+
+    if (vt === 3 || vt === 19) {
+      this.writeVariantU32(variant, Number(value));
+      return;
+    }
+
+    if (vt === 20 || vt === 21) {
+      this.writeVariantU64(variant, value);
+      return;
+    }
+
+    this.writeVariantBstr(variant, value);
   },
 };
 
