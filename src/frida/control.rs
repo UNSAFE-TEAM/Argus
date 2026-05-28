@@ -138,6 +138,7 @@ fn load_demo_scripts() -> anyhow::Result<String> {
     scripts.push(include_str!("../../bootstrap.js").to_string());
 
     let mut script_paths = Vec::new();
+    script_paths.extend(collect_js_scripts(&scripts_dir.join("anti_injection"))?);
     script_paths.extend(collect_js_scripts(&scripts_dir.join("anti_debug"))?);
     script_paths.extend(collect_js_scripts(&scripts_dir.join("anti_sandbox"))?);
 
