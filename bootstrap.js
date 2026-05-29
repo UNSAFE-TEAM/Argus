@@ -1,7 +1,9 @@
 globalThis.Agent = {
   modules: {},
   moduleCallbacks: {},
+  attachedApis: {},
 
+  // Event output API.
   log(event, tag, subject = null, data = {}) {
     send({
       schema: "argus.frida.v1",
@@ -27,21 +29,6 @@ globalThis.Agent = {
       name: moduleName,
       address: address ? address.toString() : null,
     };
-  },
-
-  normalizeModuleName(name) {
-    return String(name || "")
-      .split("\\")
-      .pop()
-      .split("/")
-      .pop()
-      .toLowerCase();
-  },
-
-  hasModuleCallbacks(moduleName) {
-    const key = this.normalizeModuleName(moduleName);
-    const callbacks = this.moduleCallbacks[key];
-    return !!callbacks && callbacks.length > 0;
   },
 
   collectArgs(args, spec) {
@@ -82,6 +69,62 @@ globalThis.Agent = {
       ...data,
     });
   },
+
+  // Rule SDK.
+  whenModuleLoaded(moduleName, callback) {
+    const key = this.normalizeModuleName(moduleName);
+    const existing = Process.findModuleByName(key);
+
+    if (existing) {
+      this.modules[key] = existing;
+      callback(existing);
+      return;
+    }
+
+    if (!this.moduleCallbacks[key]) {
+      this.moduleCallbacks[key] = [];
+    }
+
+    this.moduleCallbacks[key].push(callback);
+
+    this.skip("module", this.moduleSubject(key), {
+      moduleName: key,
+      reason: "pending_module_load",
+    });
+  },
+
+  attachApi(tag, moduleName, apiName, handlerFactory) {
+    const normalizedModuleName = this.normalizeModuleName(moduleName);
+    const key = `${normalizedModuleName}!${apiName}`;
+
+    if (this.attachedApis[key]) {
+      return false;
+    }
+
+    const addr = this.getExport(normalizedModuleName, apiName);
+
+    if (!addr) {
+      return false;
+    }
+
+    this.attachedApis[key] = true;
+    Interceptor.attach(addr, handlerFactory(addr));
+    this.register(tag, normalizedModuleName, apiName);
+
+    return true;
+  },
+
+  attachApis(tag, hooks, handlerFactory) {
+    for (const hook of hooks) {
+      this.whenModuleLoaded(hook.moduleName, () => {
+        this.attachApi(tag, hook.moduleName, hook.apiName, (addr) =>
+          handlerFactory(hook, addr),
+        );
+      });
+    }
+  },
+
+  // Bootstrap lifecycle.
   initMainModule() {
     const m = Process.enumerateModules()[0];
 
@@ -118,28 +161,6 @@ globalThis.Agent = {
         });
       }
     }
-  },
-
-  whenModuleLoaded(moduleName, callback) {
-    const key = this.normalizeModuleName(moduleName);
-    const existing = Process.findModuleByName(key);
-
-    if (existing) {
-      this.modules[key] = existing;
-      callback(existing);
-      return;
-    }
-
-    if (!this.moduleCallbacks[key]) {
-      this.moduleCallbacks[key] = [];
-    }
-
-    this.moduleCallbacks[key].push(callback);
-
-    this.skip("module", this.moduleSubject(key), {
-      moduleName: key,
-      reason: "pending_module_load",
-    });
   },
 
   notifyModuleLoaded(moduleName) {
@@ -295,6 +316,22 @@ globalThis.Agent = {
 
       return null;
     }
+  },
+
+  // General helpers.
+  normalizeModuleName(name) {
+    return String(name || "")
+      .split("\\")
+      .pop()
+      .split("/")
+      .pop()
+      .toLowerCase();
+  },
+
+  hasModuleCallbacks(moduleName) {
+    const key = this.normalizeModuleName(moduleName);
+    const callbacks = this.moduleCallbacks[key];
+    return !!callbacks && callbacks.length > 0;
   },
 
   readUtf16(ptr) {

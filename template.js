@@ -8,19 +8,8 @@
     // { index: 1, name: "arg1" },
   ];
 
-  let installed = false;
-
   function install() {
-    if (installed) {
-      return;
-    }
-
-    const addr = Agent.getExport(MODULE_NAME, API_NAME);
-    if (!addr) {
-      return;
-    }
-
-    Interceptor.attach(addr, {
+    Agent.attachApi(TAG, MODULE_NAME, API_NAME, () => ({
       onEnter(args) {
         this.caller = this.returnAddress;
 
@@ -46,10 +35,7 @@
           // path: this.path,
         });
       },
-    });
-
-    installed = true;
-    Agent.register(TAG, MODULE_NAME, API_NAME);
+    }));
   }
 
   Agent.safeCall(TAG, () => {
