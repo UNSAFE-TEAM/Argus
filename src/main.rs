@@ -9,6 +9,7 @@ async fn main() -> anyhow::Result<()> {
     let path = args.save();
     let quiet = args.quiet();
     let preset = args.presets();
+    let source = args.scripts_dir();
 
     // 消息隧道
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -19,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // frida
-    let runner = frida::FridaRunner::new(args.target(), tx, preset);
+    let runner = frida::FridaRunner::new(args.target(), tx, preset, source);
     runner.run()?;
 
     Ok(())

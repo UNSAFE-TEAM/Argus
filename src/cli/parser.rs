@@ -43,6 +43,10 @@ pub struct Args {
     #[arg(short, long)]
     quiet: bool,
 
+    /// Load scripts from a local directory instead of embedded scripts
+    #[arg(long = "scripts-dir")]
+    scripts_dir: Option<PathBuf>,
+
     /// Display help information
     #[arg(short, long, action = clap::ArgAction::Help)]
     pub help: Option<bool>,
@@ -76,6 +80,9 @@ impl Preset {
 }
 
 impl Args {
+    pub fn scripts_dir(&self) -> Option<PathBuf> {
+        self.scripts_dir.clone()
+    }
     pub fn presets(&self) -> Option<Preset> {
         self.presets.clone()
     }

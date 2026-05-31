@@ -3,6 +3,7 @@ use super::message::Handler;
 use crate::cli::{Preset, Target};
 use anyhow::Context;
 use frida::{DeviceManager, Frida, ScriptOption, Session, SpawnOptions};
+use std::path::PathBuf;
 use std::{thread, time::Duration};
 use tokio::sync::mpsc;
 
@@ -10,14 +11,21 @@ pub struct FridaRunner {
     command: Target,
     tx: mpsc::UnboundedSender<String>,
     preset: Option<Preset>,
+    source: Option<PathBuf>,
 }
 
 impl FridaRunner {
-    pub fn new(command: Target, tx: mpsc::UnboundedSender<String>, preset: Option<Preset>) -> Self {
+    pub fn new(
+        command: Target,
+        tx: mpsc::UnboundedSender<String>,
+        preset: Option<Preset>,
+        source: Option<PathBuf>,
+    ) -> Self {
         Self {
             command,
             tx,
             preset,
+            source,
         }
     }
 
@@ -26,6 +34,7 @@ impl FridaRunner {
 
         let options = ScriptLoadOptions {
             preset: self.preset,
+            scripts_dir: self.source,
         };
 
         let frida = unsafe { Frida::obtain() };
