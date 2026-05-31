@@ -19,7 +19,8 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // frida
-    frida::control::run(args.target(), tx, preset)?;
+    let runner = frida::FridaRunner::new(args.target(), tx, preset);
+    runner.run()?;
 
     Ok(())
 }
