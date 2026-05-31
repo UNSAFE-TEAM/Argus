@@ -1,4 +1,5 @@
-globalThis.Agent = {
+globalThis.AgentV1 = {
+  version: "argus.agent.v1",
   modules: {},
   moduleCallbacks: {},
   attachedApis: {},
@@ -34,7 +35,13 @@ globalThis.Agent = {
   collectArgs(args, spec) {
     const items = {};
     for (const item of spec) {
-      items[item.name] = args[item.index].toString();
+      try {
+        const value = args ? args[item.index] : null;
+        items[item.name] =
+          value === null || value === undefined ? "" : value.toString();
+      } catch (e) {
+        items[item.name] = `<read_error:${String(e)}>`;
+      }
     }
     return items;
   },
@@ -143,7 +150,15 @@ globalThis.Agent = {
     });
   },
   initModules() {
-    const names = ["ntdll.dll", "kernel32.dll", "kernelbase.dll", "d3d9.dll"];
+    const names = [
+      "ntdll.dll",
+      "kernel32.dll",
+      "kernelbase.dll",
+      "user32.dll",
+      "winmm.dll",
+      "iphlpapi.dll",
+      "d3d9.dll",
+    ];
 
     for (const name of names) {
       const m = Process.findModuleByName(name);
@@ -274,7 +289,7 @@ globalThis.Agent = {
     Interceptor.attach(addr, {
       onEnter(args) {
         this.caller = this.returnAddress;
-        this.dllName = Agent.readUnicodeString(args[2]);
+        this.dllName = AgentV1.readUnicodeString(args[2]);
       },
 
       onLeave(retval) {
@@ -284,22 +299,22 @@ globalThis.Agent = {
           return;
         }
 
-        if (!Agent.hasModuleCallbacks(this.dllName)) {
+        if (!AgentV1.hasModuleCallbacks(this.dllName)) {
           return;
         }
 
-        Agent.triggered(
+        AgentV1.triggered(
           "module_loader",
           moduleName,
           apiName,
           this.caller.toString(),
           {
-            original: { moduleName: Agent.normalizeModuleName(this.dllName) },
-            current: { moduleName: Agent.normalizeModuleName(this.dllName) },
+            original: { moduleName: AgentV1.normalizeModuleName(this.dllName) },
+            current: { moduleName: AgentV1.normalizeModuleName(this.dllName) },
           },
         );
 
-        Agent.notifyModuleLoaded(this.dllName);
+        AgentV1.notifyModuleLoaded(this.dllName);
       },
     });
 
@@ -415,7 +430,10 @@ globalThis.Agent = {
   },
 
   comMethod(comObject, index) {
-    return comObject.readPointer().add(Process.pointerSize * index).readPointer();
+    return comObject
+      .readPointer()
+      .add(Process.pointerSize * index)
+      .readPointer();
   },
 
   isGuid(ptrValue, bytes) {
@@ -488,10 +506,11 @@ globalThis.Agent = {
   },
 };
 
-Agent.initMainModule();
-Agent.initModules();
-Agent.hookModuleLoader();
+AgentV1.initMainModule();
+AgentV1.initModules();
+AgentV1.hookModuleLoader();
 
-Agent.init("bootstrap", null, {
+AgentV1.init("bootstrap", null, {
   status: "initialized",
+  agentVersion: AgentV1.version,
 });

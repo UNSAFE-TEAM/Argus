@@ -23,9 +23,13 @@ pub struct Args {
     #[arg(short, long)]
     exec: Option<String>,
 
-    // Execute with specified PID
+    /// Execute with specified PID
     #[arg(short, long)]
     pid: Option<u32>,
+
+    /// Use a preset configuration
+    #[arg(short = 'P', long = "preset", value_enum)]
+    pub presets: Option<Preset>,
 
     /// Output mode selection
     #[arg(short, long, value_enum, default_value_t = Output::Console)]
@@ -53,13 +57,28 @@ pub enum Target {
     Exec(String),
     Pid(u32),
 }
-
+#[derive(Debug, Clone, ValueEnum)]
+pub enum Preset {
+    Vmware,
+}
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum Output {
     Console,
     Jsonl,
 }
+
+impl Preset {
+    pub fn dir_name(&self) -> &'static str {
+        match self {
+            Preset::Vmware => "vmware",
+        }
+    }
+}
+
 impl Args {
+    pub fn presets(&self) -> Option<Preset> {
+        self.presets.clone()
+    }
     pub fn output(&self) -> Output {
         self.output
     }
@@ -82,6 +101,7 @@ impl Args {
         unreachable!("clap requires either --exec or --pid");
     }
 }
+
 pub fn parser() -> Args {
     Args::parse()
 }

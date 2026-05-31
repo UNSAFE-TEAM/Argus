@@ -1,4 +1,4 @@
-use crate::cli::Target;
+use crate::cli::{Preset, Target};
 use anyhow::Context;
 use frida::{DeviceManager, Frida, Message, ScriptHandler, ScriptOption, Session, SpawnOptions};
 use std::{
@@ -42,7 +42,11 @@ fn extract_argus_raw_message(message: &Message) -> Option<String> {
         .map(str::to_string)
 }
 
-pub fn run(command: Target, tx: mpsc::UnboundedSender<String>) -> anyhow::Result<()> {
+pub fn run(
+    command: Target,
+    tx: mpsc::UnboundedSender<String>,
+    preset: Option<Preset>,
+) -> anyhow::Result<()> {
     let _ = OUTPUT_TX.set(tx);
 
     let frida = unsafe { Frida::obtain() };
@@ -54,7 +58,7 @@ pub fn run(command: Target, tx: mpsc::UnboundedSender<String>) -> anyhow::Result
         Target::Pid(pid) => {
             println!("[*] attaching pid: {pid}");
             let session = device.attach(pid).with_context(|| "attach failed")?;
-            let _script = load_script(&session)?;
+            let _script = load_script(&session, preset)?;
             wait_for_process_exit(&device, pid);
         }
         Target::Exec(command) => {
@@ -74,7 +78,7 @@ pub fn run(command: Target, tx: mpsc::UnboundedSender<String>) -> anyhow::Result
             println!("[*] attaching pid: {pid}");
 
             let session = device.attach(pid).with_context(|| "attach failed")?;
-            let _script = load_script(&session)?;
+            let _script = load_script(&session, preset)?;
 
             device.resume(pid).with_context(|| "resume failed")?;
             println!("[*] process resumed");
@@ -112,9 +116,12 @@ fn split_exec_command(command: &str) -> anyhow::Result<(String, Vec<String>)> {
     Ok((program, args))
 }
 
-fn load_script<'a>(session: &'a Session<'a>) -> anyhow::Result<frida::Script<'a>> {
+fn load_script<'a>(
+    session: &'a Session<'a>,
+    preset: Option<Preset>,
+) -> anyhow::Result<frida::Script<'a>> {
     let mut script_options = ScriptOption::default();
-    let script_source = load_demo_scripts()?;
+    let script_source = load_demo_scripts(preset)?;
 
     let mut script = session
         .create_script(&script_source, &mut script_options)
@@ -129,18 +136,21 @@ fn load_script<'a>(session: &'a Session<'a>) -> anyhow::Result<frida::Script<'a>
     println!("[*] script loaded");
     Ok(script)
 }
-
-fn load_demo_scripts() -> anyhow::Result<String> {
+fn load_demo_scripts(preset: Option<Preset>) -> anyhow::Result<String> {
     let scripts_dir = PathBuf::from("scripts");
 
     let mut scripts = Vec::new();
 
-    scripts.push(include_str!("../../bootstrap.js").to_string());
+    scripts.push(include_str!("../../runtime/bootstrap/agent.v1.js").to_string());
+    scripts.push(include_str!("../../runtime/sensors/sensors.v1.js").to_string());
 
     let mut script_paths = Vec::new();
+
+    script_paths.extend(collect_js_scripts(&scripts_dir.join("sensors"))?);
     script_paths.extend(collect_js_scripts(&scripts_dir.join("anti_injection"))?);
     script_paths.extend(collect_js_scripts(&scripts_dir.join("anti_debug"))?);
     script_paths.extend(collect_js_scripts(&scripts_dir.join("anti_sandbox"))?);
+    script_paths.extend(load_preset_scripts(&scripts_dir, preset)?);
 
     for path in script_paths {
         let script = fs::read_to_string(&path)
@@ -149,6 +159,16 @@ fn load_demo_scripts() -> anyhow::Result<String> {
     }
 
     Ok(scripts.join("\n\n"))
+}
+
+fn load_preset_scripts(scripts_dir: &Path, preset: Option<Preset>) -> anyhow::Result<Vec<PathBuf>> {
+    let Some(preset) = preset else {
+        return Ok(Vec::new());
+    };
+
+    let preset_dir = scripts_dir.join("presets").join(preset.dir_name());
+
+    collect_js_scripts(&preset_dir)
 }
 
 fn collect_js_scripts(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
@@ -161,7 +181,9 @@ fn collect_js_scripts(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
             .with_context(|| format!("read scripts directory entry failed: {}", dir.display()))?
             .path();
 
-        if path.extension().is_some_and(|ext| ext == "js") {
+        if path.is_dir() {
+            scripts.extend(collect_js_scripts(&path)?);
+        } else if path.extension().is_some_and(|ext| ext == "js") {
             scripts.push(path);
         }
     }
