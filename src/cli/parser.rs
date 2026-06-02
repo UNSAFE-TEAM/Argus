@@ -24,12 +24,16 @@ pub struct Args {
     exec: Option<String>,
 
     /// Execute with specified PID
-    #[arg(short, long)]
+    #[arg(short = 'P', long)]
     pid: Option<u32>,
 
     /// Use a preset configuration
-    #[arg(short = 'P', long = "preset", value_enum)]
+    #[arg(short = 'p', long = "preset", value_enum)]
     pub presets: Option<Preset>,
+
+    /// Use a module configuration
+    #[arg(short, long = "module", value_enum)]
+    pub module: Option<Module>,
 
     /// Output mode selection
     #[arg(short, long, value_enum, default_value_t = Output::Console)]
@@ -65,6 +69,12 @@ pub enum Target {
 pub enum Preset {
     Vmware,
 }
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum Module {
+    Behavior,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum Output {
     Console,
@@ -79,12 +89,23 @@ impl Preset {
     }
 }
 
+impl Module {
+    pub fn dir_name(&self) -> &'static str {
+        match self {
+            Module::Behavior => "behavior",
+        }
+    }
+}
+
 impl Args {
     pub fn scripts_dir(&self) -> Option<PathBuf> {
         self.scripts_dir.clone()
     }
     pub fn presets(&self) -> Option<Preset> {
         self.presets.clone()
+    }
+    pub fn module(&self) -> Option<Module> {
+        self.module.clone()
     }
     pub fn output(&self) -> Output {
         self.output

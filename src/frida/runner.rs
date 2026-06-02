@@ -1,6 +1,6 @@
 use super::load::{self, ScriptLoadOptions};
 use super::message::Handler;
-use crate::cli::{Preset, Target};
+use crate::cli::{Module, Preset, Target};
 use anyhow::Context;
 use frida::{DeviceManager, Frida, ScriptOption, Session, SpawnOptions};
 use std::path::PathBuf;
@@ -11,6 +11,7 @@ pub struct FridaRunner {
     command: Target,
     tx: mpsc::UnboundedSender<String>,
     preset: Option<Preset>,
+    module: Option<Module>,
     source: Option<PathBuf>,
 }
 
@@ -19,12 +20,14 @@ impl FridaRunner {
         command: Target,
         tx: mpsc::UnboundedSender<String>,
         preset: Option<Preset>,
+        module: Option<Module>,
         source: Option<PathBuf>,
     ) -> Self {
         Self {
             command,
             tx,
             preset,
+            module,
             source,
         }
     }
@@ -34,6 +37,7 @@ impl FridaRunner {
 
         let options = ScriptLoadOptions {
             preset: self.preset,
+            module: self.module,
             scripts_dir: self.source,
         };
 

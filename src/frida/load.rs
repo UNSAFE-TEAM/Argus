@@ -1,4 +1,4 @@
-use crate::cli::Preset;
+use crate::cli::{Module, Preset};
 use anyhow::Context;
 use std::{
     fs,
@@ -7,6 +7,7 @@ use std::{
 
 pub struct ScriptLoadOptions {
     pub preset: Option<Preset>,
+    pub module: Option<Module>,
     pub scripts_dir: Option<PathBuf>,
 }
 
@@ -45,11 +46,19 @@ fn load_embedded_scripts(options: &ScriptLoadOptions) -> Vec<String> {
     scripts.extend(embedded_group("scripts/anti_injection/"));
     scripts.extend(embedded_group("scripts/anti_debug/"));
     scripts.extend(embedded_group("scripts/anti_sandbox/"));
+    scripts.extend(embedded_group("scripts/modules/behavior/"));
 
     if let Some(preset) = &options.preset {
         scripts.extend(embedded_group(&format!(
             "scripts/presets/{}/",
             preset.dir_name()
+        )));
+    }
+
+    if let Some(module) = &options.module {
+        scripts.extend(embedded_group(&format!(
+            "scripts/modules/{}/",
+            module.dir_name()
         )));
     }
 
@@ -74,17 +83,20 @@ fn load_filesystem_scripts(
     paths.extend(collect_js_scripts(&scripts_dir.join("anti_injection"))?);
     paths.extend(collect_js_scripts(&scripts_dir.join("anti_debug"))?);
     paths.extend(collect_js_scripts(&scripts_dir.join("anti_sandbox"))?);
-    paths.extend(load_preset_paths(scripts_dir, options.preset.as_ref())?);
-
+    paths.extend(collect_js_scripts(
+        &scripts_dir.join("modules").join("behavior"),
+    )?);
+    if let Some(preset) = &options.preset {
+        paths.extend(collect_js_scripts(
+            &scripts_dir.join("modules").join(preset.dir_name()),
+        )?);
+    }
+    if let Some(module) = &options.module {
+        paths.extend(collect_js_scripts(
+            &scripts_dir.join("modules").join(module.dir_name()),
+        )?);
+    }
     read_scripts(paths)
-}
-
-fn load_preset_paths(scripts_dir: &Path, preset: Option<&Preset>) -> anyhow::Result<Vec<PathBuf>> {
-    let Some(preset) = preset else {
-        return Ok(Vec::new());
-    };
-
-    collect_js_scripts(&scripts_dir.join("presets").join(preset.dir_name()))
 }
 
 fn read_scripts(paths: Vec<PathBuf>) -> anyhow::Result<Vec<String>> {

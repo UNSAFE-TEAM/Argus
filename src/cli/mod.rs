@@ -1,2 +1,2 @@
 pub mod parser;
-pub use parser::{Output, Preset, Target, parser};
+pub use parser::{Module, Output, Preset, Target, parser};
