@@ -46,7 +46,6 @@ fn load_embedded_scripts(options: &ScriptLoadOptions) -> Vec<String> {
     scripts.extend(embedded_group("scripts/anti_injection/"));
     scripts.extend(embedded_group("scripts/anti_debug/"));
     scripts.extend(embedded_group("scripts/anti_sandbox/"));
-    scripts.extend(embedded_group("scripts/modules/behavior/"));
 
     if let Some(preset) = &options.preset {
         scripts.extend(embedded_group(&format!(
@@ -83,12 +82,10 @@ fn load_filesystem_scripts(
     paths.extend(collect_js_scripts(&scripts_dir.join("anti_injection"))?);
     paths.extend(collect_js_scripts(&scripts_dir.join("anti_debug"))?);
     paths.extend(collect_js_scripts(&scripts_dir.join("anti_sandbox"))?);
-    paths.extend(collect_js_scripts(
-        &scripts_dir.join("modules").join("behavior"),
-    )?);
+
     if let Some(preset) = &options.preset {
         paths.extend(collect_js_scripts(
-            &scripts_dir.join("modules").join(preset.dir_name()),
+            &scripts_dir.join("presets").join(preset.dir_name()),
         )?);
     }
     if let Some(module) = &options.module {
