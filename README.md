@@ -23,32 +23,190 @@
 
 ## Overview
 
-Argus is a Windows dynamic behavior observation tool built on top of [Frida](https://frida.re/). It launches or attaches to a target process, injects a JavaScript runtime, loads rule scripts, and streams structured events back to Rust for console or JSONL output.
+Argus is a Windows dynamic analysis tool built on top of [Frida](https://frida.re/).
+It launches or attaches to a target process, injects a JavaScript runtime, loads
+rule scripts, and streams structured events back to Rust for console or JSONL
+output.
 
-The project is currently focused on anti-analysis observation and patching experiments, including anti-debugging, anti-sandbox, VM checks, module loading, and API return-value normalization.
-
-## Preview
-
-<p>
-  <img src="assets/run.png" alt="Argus runtime output">
-</p>
+The current `v0.1.0` release is a preview focused on behavior observation and
+anti-analysis research. It is intended for local malware-analysis labs, especially
+VMware-based analysis environments.
 
 ## Features
 
 - Spawn a target process and attach before resume.
 - Attach to an existing process by PID.
-- Load an embedded `bootstrap.js` runtime.
-- Load external rule scripts from the `scripts` rule repository.
-- Emit structured Frida events with a stable `argus.frida.v1` schema.
-- Support console and JSONL output modes.
-- Save output to a file while optionally hiding console output.
+- Load embedded scripts or a local scripts directory.
+- Emit structured events with the `argus.frida.v1` schema.
+- Prefer main-module call sites for `collect` and `triggered` event addresses.
+- Output colorized console logs or machine-readable JSONL.
+- Save logs to disk with per-event flush for crash-resistant output.
+- Apply VMware-oriented anti-sandbox profiles.
+- Detect common behavior across process, file, registry, service, network, sync object, and injection activity.
 
-## Rules
+## Current Coverage
 
-Rule scripts live in a separate repository and are referenced as a Git submodule:
+### Anti-Analysis
+
+- `IsDebuggerPresent` return normalization.
+- Module enumeration hiding for Frida-related modules.
+- VMware-oriented CPU, memory, disk, WMI, firmware, MAC, registry, file, and D3D profile handling.
+- User activity handling through cursor and last-input APIs.
+- Window probing handling for common debugger, analysis, sandbox, and VM window names.
+
+### Behavior
+
+- Process creation and process exit.
+- Shell execution.
+- File create/write/delete/move/copy/attribute changes.
+- Registry open/query/set/delete/rename activity.
+- Service create/start/control/delete/config changes.
+- Mutex, event, and semaphore activity.
+- Network target identification through WinHTTP, WinINet, URLMon, DNS, Winsock TCP, UDP, and ConnectEx paths.
+- Initial injection-chain detection:
+  - `OpenProcess`
+  - `VirtualAllocEx`
+  - `WriteProcessMemory`
+  - `VirtualProtectEx`
+  - `CreateRemoteThread`
+  - `CreateRemoteThreadEx`
+  - `NtCreateThreadEx`
+  - `QueueUserAPC`
+  - `SetThreadContext`
+  - `ResumeThread`
+
+## Usage
+
+Run a program:
+
+```powershell
+Argus.exe --exec ".\target.exe --flag value"
+```
+
+Short form:
+
+```powershell
+Argus.exe -e ".\target.exe"
+```
+
+Attach to a PID:
+
+```powershell
+Argus.exe --pid 1234
+```
+
+Use the VMware preset:
+
+```powershell
+Argus.exe -e ".\target.exe" -p vmware
+```
+
+Enable the behavior module:
+
+```powershell
+Argus.exe -e ".\target.exe" -p vmware -m behavior
+```
+
+Use JSONL output:
+
+```powershell
+Argus.exe -e ".\target.exe" --output jsonl
+```
+
+Save output to a file:
+
+```powershell
+Argus.exe -e ".\target.exe" --save out.jsonl
+```
+
+Save output without printing Argus events to the console:
+
+```powershell
+Argus.exe -e ".\target.exe" --quiet --save out.jsonl
+```
+
+Load scripts from a local directory instead of embedded scripts:
+
+```powershell
+Argus.exe -e ".\target.exe" --scripts-dir .\scripts
+```
+
+## Event Format
+
+Rules send events through the bootstrap runtime. The Rust side receives and
+formats events like:
+
+```json
+{
+  "schema": "argus.frida.v1",
+  "time": "2026-06-04T09:49:48.498Z",
+  "event": "triggered",
+  "tag": "behavior",
+  "subject": {
+    "name": "winhttp.dll!WinHttpConnect",
+    "address": "0x7ff7744a15ca"
+  },
+  "data": {
+    "action": "http_request",
+    "network": {
+      "host": "xxx.xxx.xxx.xxx",
+      "port": "443",
+      "method": "",
+      "path": ""
+    }
+  }
+}
+```
+
+Common event types:
+
+| Event | Purpose |
+| --- | --- |
+| `init` | Runtime or module initialization. |
+| `register` | A hook has been installed. |
+| `collect` | API call input was collected. |
+| `triggered` | A rule handled, normalized, or reported behavior. |
+| `skip` | A module or API is unavailable. |
+| `error` | Script/runtime error reporting. |
+| `other` | Auxiliary telemetry. |
+
+For `collect` and `triggered`, `subject.address` prefers the target program's
+main-module call site. If Argus cannot recover a main-module caller, it keeps the
+direct caller address. This keeps output useful for IDA, x64dbg, and runtime
+triage while preserving system-library-originated behavior.
+
+## Output Modes
+
+Console output is intended for live reading:
+
+```text
+[triggered] [behavior] winhttp.dll!WinHttpConnect @ 0x7ff7744a15ca {"action":"http_request","network":{"host":"xxx.xxx.xxx.xxx","port":"443"}}
+```
+
+JSONL output is intended for storage, tooling, and later UI rendering:
+
+```text
+{"schema":"argus.frida.v1","time":"...","event":"triggered","tag":"behavior","subject":{"name":"winhttp.dll!WinHttpConnect","address":"0x..."},"data":{"action":"http_request","network":{"host":"xxx.xxx.xxx.xxx","port":"443"}}}
+```
+
+## Scripts
+
+Rule scripts live in the `scripts` submodule:
 
 ```text
 scripts -> https://github.com/UNSAFE-TEAM/Argus-Rules.git
+```
+
+Script layout:
+
+```text
+runtime/                  Argus bootstrap runtime loaded before rules
+scripts/sensors/          Low-level API sensors
+scripts/anti_debug/       Anti-debugging rules
+scripts/anti_injection/   Frida/module hiding and injection-resistance rules
+scripts/anti_sandbox/     VM/sandbox profile normalization rules
+scripts/modules/behavior/ Behavior aggregation modules
+scripts/presets/vmware/   VMware-specific profile rules
 ```
 
 Clone with submodules:
@@ -73,91 +231,6 @@ git add scripts
 git commit -m "chore: update rules"
 ```
 
-## Usage
-
-Run a program:
-
-```powershell
-Argus.exe --exec ".\target.exe --flag value"
-```
-
-Attach to a PID:
-
-```powershell
-Argus.exe --pid 1234
-```
-
-Use JSONL output:
-
-```powershell
-Argus.exe --exec ".\target.exe" --output jsonl
-```
-
-Save output to a file:
-
-```powershell
-Argus.exe --exec ".\target.exe" --save argus.log
-```
-
-Save output without printing Argus events to the console:
-
-```powershell
-Argus.exe --exec ".\target.exe" --quiet --save argus.log
-```
-
-## Event Format
-
-Rules send events through the bootstrap runtime. The Rust side receives and formats events like:
-
-```json
-{
-  "schema": "argus.frida.v1",
-  "time": "2026-05-27T07:13:12.609Z",
-  "event": "triggered",
-  "tag": "anti_debug",
-  "subject": {
-    "name": "kernel32.dll!IsDebuggerPresent",
-    "address": "0x7ff7de79102d"
-  },
-  "data": {
-    "original": {
-      "return": "1"
-    },
-    "current": {
-      "return": "0"
-    }
-  }
-}
-```
-
-Common event types:
-
-| Event | Purpose |
-| --- | --- |
-| `init` | Runtime or module initialization. |
-| `register` | A hook has been installed. |
-| `collect` | API call input was collected. |
-| `triggered` | A rule handled or modified behavior. |
-| `skip` | A module or API is unavailable. |
-| `error` | Script/runtime error reporting. |
-
-For `collect` and `triggered`, `subject.address` is the caller return address.
-This makes the output easier to map back into IDA, x64dbg, or other debuggers.
-
-## Output Modes
-
-Console output is intended for live reading:
-
-```text
-[triggered] [anti_debug] kernel32.dll!IsDebuggerPresent @ 0x7ff7de79102d {"current":{"return":"0"},"original":{"return":"1"}}
-```
-
-JSONL output is intended for tools, storage, and later UI rendering:
-
-```text
-{"schema":"argus.frida.v1","time":"...","event":"collect","tag":"anti_debug","subject":{"name":"kernel32.dll!IsDebuggerPresent","address":"0x..."},"data":{"args":{}}}
-```
-
 ## Build
 
 Build in debug mode:
@@ -172,28 +245,32 @@ Build in release mode:
 cargo build --release
 ```
 
-The Frida Rust bindings may download the matching Frida core devkit during build. If the download fails behind a proxy, configure Cargo/Git proxy settings or place the devkit where `frida-sys` can find it.
+The Frida Rust bindings may download the matching Frida core devkit during build.
+If the download fails behind a proxy, configure Cargo/Git proxy settings or place
+the devkit where `frida-sys` can find it.
 
 ## Repository Layout
 
 ```text
-bootstrap.js       Frida runtime embedded by Argus
-scripts/           External rule scripts submodule
-src/cli/           Command-line parsing
-src/frida/         Frida session, spawn, attach, and script loading
-src/output/        Event parsing and output formatting
-template.js        Rule authoring template
-assets/            Project images
+runtime/          Frida bootstrap runtime
+scripts/          External rule scripts submodule
+src/cli/          Command-line parsing
+src/frida/        Frida spawn, attach, script loading, and message handling
+src/output/       Event parsing and output formatting
+assets/           Project images
+build.rs          Embedded script generation
 ```
 
 ## Roadmap
 
-- Improve common anti-debugging rules.
-- Improve common anti-sandbox and VM detection bypass rules.
-- Add shellcode fuzzing experiments.
-- Add unpacking and dump workflows.
-- Add richer report and UI support based on structured JSON output.
+- Expand anti-debugging rules.
+- Improve injection detection and process-hollowing coverage.
+- Add shellcode dump workflows based on executable memory and execution triggers.
+- Add x64dbg integration for automatic comments and navigation.
+- Add offline Web UI for JSONL report exploration.
+- Add unpacking-oriented dump and analysis helpers.
 
 ## Status
 
-Argus is an early-stage internal research tool. APIs, event fields, and rule layout may change while the runtime and rule system are being stabilized.
+Argus is an early-stage research tool. The event schema, rule layout, and
+behavior taxonomy may change while the runtime and rules stabilize.
