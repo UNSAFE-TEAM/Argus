@@ -3,6 +3,8 @@ globalThis.AgentV1 = {
   modules: {},
   moduleCallbacks: {},
   attachedApis: {},
+  invocationStack: [],
+  mainModuleCached: null,
 
   // Event output API.
   log(event, tag, subject = null, data = {}) {
@@ -21,21 +23,51 @@ globalThis.AgentV1 = {
   apiSubject(moduleName, apiName, address = null) {
     return {
       name: `${moduleName}!${apiName}`,
-      address: this.callSiteAddressString(address),
+      address: this.subjectAddress(address),
     };
   },
 
-  callSiteAddress(address = null) {
+  currentInvocation() {
+    return this.invocationStack[this.invocationStack.length - 1] || null;
+  },
+
+  withInvocation(caller, context, fn) {
+    this.invocationStack.push({ caller, context, resolvedCaller: null });
+
+    try {
+      return fn();
+    } finally {
+      this.invocationStack.pop();
+    }
+  },
+
+  subjectAddress(address = null) {
     if (!address) {
       return null;
     }
 
-    let returnAddress = null;
+    const invocation = this.currentInvocation();
+    if (invocation && invocation.context) {
+      return this.resolveCallerAddress(
+        invocation.caller || address,
+        invocation.context,
+      );
+    }
+
+    return this.callSiteAddressString(address);
+  },
+
+  ptrOrNull(value) {
     try {
-      returnAddress = ptr(address);
+      return value ? ptr(value) : null;
     } catch (_) {
       return null;
     }
+  },
+
+  callSiteAddress(address = null) {
+    const returnAddress = this.ptrOrNull(address);
+    if (!returnAddress) return null;
 
     for (let back = 1; back <= 16; back++) {
       try {
@@ -74,8 +106,13 @@ globalThis.AgentV1 = {
   },
 
   mainModule() {
+    if (this.mainModuleCached) {
+      return this.mainModuleCached;
+    }
+
     try {
-      return Process.enumerateModules()[0] || null;
+      this.mainModuleCached = Process.enumerateModules()[0] || null;
+      return this.mainModuleCached;
     } catch (_) {
       return null;
     }
@@ -95,31 +132,93 @@ globalThis.AgentV1 = {
     );
   },
 
-  mainCallerAddress(context, fallback = null) {
-    if (fallback && this.isMainModuleAddress(fallback)) {
-      return this.callSiteAddressString(fallback);
-    }
+  mainFrameFromBacktrace(context, backtracer) {
+    try {
+      const frames = Thread.backtrace(context, backtracer);
+      let firstMain = null;
 
+      for (const frame of frames) {
+        if (!this.isMainModuleAddress(frame)) {
+          continue;
+        }
+
+        const callSite = this.callSiteAddress(frame);
+        if (callSite) {
+          return callSite.toString();
+        }
+
+        firstMain = firstMain || frame;
+      }
+
+      return firstMain ? firstMain.toString() : null;
+    } catch (_) {
+      return null;
+    }
+  },
+
+  mainFrameFromStack(context) {
     const sp = context ? context.rsp || context.esp || context.sp : null;
 
-    if (sp) {
-      for (let i = 0; i < 96; i++) {
-        try {
-          const frame = sp.add(i * Process.pointerSize).readPointer();
+    if (!sp) {
+      return null;
+    }
 
-          if (this.isMainModuleAddress(frame)) {
-            return this.callSiteAddressString(frame);
-          }
-        } catch (_) {}
+    for (let i = 0; i < 128; i++) {
+      try {
+        const frame = sp.add(i * Process.pointerSize).readPointer();
+
+        if (!this.isMainModuleAddress(frame)) {
+          continue;
+        }
+
+        const callSite = this.callSiteAddress(frame);
+        if (callSite) {
+          return callSite.toString();
+        }
+      } catch (_) {
       }
     }
 
-    return fallback ? this.callSiteAddressString(fallback) : null;
+    return null;
+  },
+
+  mainCallerAddress(context, fallback = null) {
+    const fallbackPtr = this.ptrOrNull(fallback);
+
+    if (fallbackPtr && this.isMainModuleAddress(fallbackPtr)) {
+      return this.callSiteAddressString(fallbackPtr);
+    }
+
+    if (context) {
+      for (const backtracer of [Backtracer.ACCURATE, Backtracer.FUZZY]) {
+        const frame = this.mainFrameFromBacktrace(context, backtracer);
+        if (frame) return frame;
+      }
+
+      const scanned = this.mainFrameFromStack(context);
+      if (scanned) return scanned;
+    }
+
+    return fallbackPtr ? this.callSiteAddressString(fallbackPtr) : null;
   },
 
   resolveCallerAddress(caller, context = null) {
     if (!caller) {
       return null;
+    }
+
+    const invocation = this.currentInvocation();
+    if (invocation && invocation.context === context) {
+      if (!invocation.resolvedCaller) {
+        invocation.resolvedCaller = this.mainCallerAddress(
+          invocation.context,
+          invocation.caller || caller,
+        );
+      }
+
+      if (invocation.resolvedCaller) {
+        return invocation.resolvedCaller;
+      }
     }
 
     return this.mainCallerAddress(context, caller) || caller.toString();
@@ -214,8 +313,33 @@ globalThis.AgentV1 = {
       return false;
     }
 
+    const handler = handlerFactory(addr);
+
     this.attachedApis[key] = true;
-    Interceptor.attach(addr, handlerFactory(addr));
+    Interceptor.attach(addr, {
+      onEnter(args) {
+        this.__argusCaller = this.returnAddress;
+        this.__argusContext = this.context;
+
+        if (handler.onEnter) {
+          return AgentV1.withInvocation(
+            this.__argusCaller,
+            this.__argusContext,
+            () => handler.onEnter.call(this, args),
+          );
+        }
+      },
+
+      onLeave(retval) {
+        if (handler.onLeave) {
+          return AgentV1.withInvocation(
+            this.__argusCaller,
+            this.__argusContext,
+            () => handler.onLeave.call(this, retval),
+          );
+        }
+      },
+    });
     this.register(tag, normalizedModuleName, apiName);
 
     return true;
@@ -391,6 +515,7 @@ globalThis.AgentV1 = {
     Interceptor.attach(addr, {
       onEnter(args) {
         this.caller = this.returnAddress;
+        this.callerContext = this.context;
         this.dllName = AgentV1.readUnicodeString(args[2]);
       },
 
@@ -405,15 +530,19 @@ globalThis.AgentV1 = {
           return;
         }
 
-        AgentV1.triggered(
-          "module_loader",
-          moduleName,
-          apiName,
-          this.caller.toString(),
-          {
-            original: { moduleName: AgentV1.normalizeModuleName(this.dllName) },
-            current: { moduleName: AgentV1.normalizeModuleName(this.dllName) },
-          },
+        AgentV1.withInvocation(
+          this.caller,
+          this.callerContext,
+          () => AgentV1.triggered(
+            "module_loader",
+            moduleName,
+            apiName,
+            this.caller.toString(),
+            {
+              original: { moduleName: AgentV1.normalizeModuleName(this.dllName) },
+              current: { moduleName: AgentV1.normalizeModuleName(this.dllName) },
+            },
+          ),
         );
 
         AgentV1.notifyModuleLoaded(this.dllName);

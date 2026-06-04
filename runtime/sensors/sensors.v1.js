@@ -15,6 +15,21 @@ globalThis.ArgusSensorsV1 = globalThis.ArgusSensorsV1 || {
       },
 
       emit(ctx) {
+        if (ctx && ctx.caller) {
+          const invocation = AgentV1.currentInvocation
+            ? AgentV1.currentInvocation()
+            : null;
+
+          if (!ctx.context && invocation && invocation.context) {
+            ctx.context = invocation.context;
+          }
+
+          if (ctx.context) {
+            ctx.rawCaller = ctx.rawCaller || ctx.caller;
+            ctx.caller = AgentV1.resolveCallerAddress(ctx.caller, ctx.context);
+          }
+        }
+
         for (const handler of this.handlers) {
           AgentV1.safeCall(`${name}:${handler.name || "handler"}`, () => {
             if (handler.match && !handler.match(ctx)) {
