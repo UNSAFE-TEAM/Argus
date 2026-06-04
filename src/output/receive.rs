@@ -56,6 +56,10 @@ pub async fn receive(
             if let Err(err) = writeln!(writer, "{line}") {
                 eprintln!("[output file write error] {err}");
             }
+
+            if let Err(err) = writer.flush() {
+                eprintln!("[output file flush error] {err}");
+            }
         }
     }
 

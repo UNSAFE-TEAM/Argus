@@ -81,8 +81,7 @@ globalThis.AgentV1 = {
         ) {
           return candidate;
         }
-      } catch (_) {
-      }
+      } catch (_) {}
     }
 
     return null;
@@ -163,7 +162,9 @@ globalThis.AgentV1 = {
       return null;
     }
 
-    for (let i = 0; i < 128; i++) {
+    let firstMain = null;
+
+    for (let i = 0; i < 256; i++) {
       try {
         const frame = sp.add(i * Process.pointerSize).readPointer();
 
@@ -175,11 +176,12 @@ globalThis.AgentV1 = {
         if (callSite) {
           return callSite.toString();
         }
-      } catch (_) {
-      }
+
+        firstMain = firstMain || frame;
+      } catch (_) {}
     }
 
-    return null;
+    return firstMain ? firstMain.toString() : null;
   },
 
   mainCallerAddress(context, fallback = null) {
@@ -384,6 +386,7 @@ globalThis.AgentV1 = {
       "d3d9.dll",
       "ucrtbase.dll",
       "msvcrt.dll",
+      "mswsock.dll",
     ];
 
     for (const name of names) {
@@ -530,17 +533,19 @@ globalThis.AgentV1 = {
           return;
         }
 
-        AgentV1.withInvocation(
-          this.caller,
-          this.callerContext,
-          () => AgentV1.triggered(
+        AgentV1.withInvocation(this.caller, this.callerContext, () =>
+          AgentV1.triggered(
             "module_loader",
             moduleName,
             apiName,
             this.caller.toString(),
             {
-              original: { moduleName: AgentV1.normalizeModuleName(this.dllName) },
-              current: { moduleName: AgentV1.normalizeModuleName(this.dllName) },
+              original: {
+                moduleName: AgentV1.normalizeModuleName(this.dllName),
+              },
+              current: {
+                moduleName: AgentV1.normalizeModuleName(this.dllName),
+              },
             },
           ),
         );
