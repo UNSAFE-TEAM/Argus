@@ -63,17 +63,7 @@ VMware-based analysis environments.
 - Service create/start/control/delete/config changes.
 - Mutex, event, and semaphore activity.
 - Network target identification through WinHTTP, WinINet, URLMon, DNS, Winsock TCP, UDP, and ConnectEx paths.
-- Initial injection-chain detection:
-  - `OpenProcess`
-  - `VirtualAllocEx`
-  - `WriteProcessMemory`
-  - `VirtualProtectEx`
-  - `CreateRemoteThread`
-  - `CreateRemoteThreadEx`
-  - `NtCreateThreadEx`
-  - `QueueUserAPC`
-  - `SetThreadContext`
-  - `ResumeThread`
+- Injection behavior detection for remote process memory and thread activity.
 
 ## Usage
 
@@ -269,6 +259,10 @@ build.rs          Embedded script generation
 - Add x64dbg integration for automatic comments and navigation.
 - Add offline Web UI for JSONL report exploration.
 - Add unpacking-oriented dump and analysis helpers.
+
+## License
+
+Argus is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## Status
 
