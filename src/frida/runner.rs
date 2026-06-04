@@ -7,6 +7,8 @@ use std::path::PathBuf;
 use std::{thread, time::Duration};
 use tokio::sync::mpsc;
 
+const MESSAGE_DRAIN_DELAY: Duration = Duration::from_millis(250);
+
 pub struct FridaRunner {
     command: Target,
     tx: mpsc::UnboundedSender<String>,
@@ -50,6 +52,7 @@ impl FridaRunner {
                 let session = device.attach(pid).with_context(|| "attach failed")?;
                 let _script = load_script(&session, &options)?;
                 wait_for_process_exit(&device, pid);
+                drain_pending_messages();
             }
 
             Target::Exec(command) => {
@@ -68,6 +71,7 @@ impl FridaRunner {
 
                 device.resume(pid).with_context(|| "resume failed")?;
                 wait_for_process_exit(&device, pid);
+                drain_pending_messages();
             }
         }
 
@@ -108,6 +112,10 @@ fn wait_for_process_exit(device: &frida::Device<'_>, pid: u32) {
 
         thread::sleep(Duration::from_secs(1));
     }
+}
+
+fn drain_pending_messages() {
+    thread::sleep(MESSAGE_DRAIN_DELAY);
 }
 
 fn split_exec_command(command: &str) -> anyhow::Result<(String, Vec<String>)> {

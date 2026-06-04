@@ -21,8 +21,108 @@ globalThis.AgentV1 = {
   apiSubject(moduleName, apiName, address = null) {
     return {
       name: `${moduleName}!${apiName}`,
-      address: address ? address.toString() : null,
+      address: this.callSiteAddressString(address),
     };
+  },
+
+  callSiteAddress(address = null) {
+    if (!address) {
+      return null;
+    }
+
+    let returnAddress = null;
+    try {
+      returnAddress = ptr(address);
+    } catch (_) {
+      return null;
+    }
+
+    for (let back = 1; back <= 16; back++) {
+      try {
+        const candidate = returnAddress.sub(back);
+        const instruction = Instruction.parse(candidate);
+        const mnemonic = String(instruction.mnemonic || "").toLowerCase();
+
+        if (
+          mnemonic === "call" &&
+          candidate.add(instruction.size).compare(returnAddress) === 0
+        ) {
+          return candidate;
+        }
+      } catch (_) {
+      }
+    }
+
+    return null;
+  },
+
+  callSiteAddressString(address = null) {
+    if (!address) {
+      return null;
+    }
+
+    const callSite = this.callSiteAddress(address);
+    if (callSite) {
+      return callSite.toString();
+    }
+
+    try {
+      return ptr(address).toString();
+    } catch (_) {
+      return String(address);
+    }
+  },
+
+  mainModule() {
+    try {
+      return Process.enumerateModules()[0] || null;
+    } catch (_) {
+      return null;
+    }
+  },
+
+  isMainModuleAddress(address) {
+    const main = this.mainModule();
+
+    if (!main || !address) {
+      return false;
+    }
+
+    const value = ptr(address);
+    return (
+      value.compare(main.base) >= 0 &&
+      value.compare(main.base.add(main.size)) < 0
+    );
+  },
+
+  mainCallerAddress(context, fallback = null) {
+    if (fallback && this.isMainModuleAddress(fallback)) {
+      return this.callSiteAddressString(fallback);
+    }
+
+    const sp = context ? context.rsp || context.esp || context.sp : null;
+
+    if (sp) {
+      for (let i = 0; i < 96; i++) {
+        try {
+          const frame = sp.add(i * Process.pointerSize).readPointer();
+
+          if (this.isMainModuleAddress(frame)) {
+            return this.callSiteAddressString(frame);
+          }
+        } catch (_) {}
+      }
+    }
+
+    return fallback ? this.callSiteAddressString(fallback) : null;
+  },
+
+  resolveCallerAddress(caller, context = null) {
+    if (!caller) {
+      return null;
+    }
+
+    return this.mainCallerAddress(context, caller) || caller.toString();
   },
 
   moduleSubject(moduleName, address = null) {
@@ -158,6 +258,8 @@ globalThis.AgentV1 = {
       "winmm.dll",
       "iphlpapi.dll",
       "d3d9.dll",
+      "ucrtbase.dll",
+      "msvcrt.dll",
     ];
 
     for (const name of names) {
