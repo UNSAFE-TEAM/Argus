@@ -3,6 +3,7 @@ use super::message::Handler;
 use crate::cli::{Module, Preset, Target};
 use anyhow::Context;
 use frida::{DeviceManager, Frida, ScriptOption, Session, SpawnOptions};
+use std::io;
 use std::path::PathBuf;
 use std::{thread, time::Duration};
 use tokio::sync::mpsc;
@@ -15,6 +16,7 @@ pub struct FridaRunner {
     preset: Option<Preset>,
     module: Option<Module>,
     source: Option<PathBuf>,
+    no_resume: bool,
 }
 
 impl FridaRunner {
@@ -24,6 +26,7 @@ impl FridaRunner {
         preset: Option<Preset>,
         module: Option<Module>,
         source: Option<PathBuf>,
+        no_resume: bool,
     ) -> Self {
         Self {
             command,
@@ -31,6 +34,7 @@ impl FridaRunner {
             preset,
             module,
             source,
+            no_resume,
         }
     }
 
@@ -65,6 +69,14 @@ impl FridaRunner {
                 let pid = device
                     .spawn(&program, &spawn_options)
                     .with_context(|| "spawn failed")?;
+
+                if self.no_resume {
+                    println!("[argus] spawned, pid={pid}");
+                    println!(
+                        "[argus] attach your debugger now, then press Enter to inject and resume"
+                    );
+                    wait_for_enter()?;
+                }
 
                 let session = device.attach(pid).with_context(|| "attach failed")?;
                 let _script = load_script(&session, &options)?;
@@ -116,6 +128,14 @@ fn wait_for_process_exit(device: &frida::Device<'_>, pid: u32) {
 
 fn drain_pending_messages() {
     thread::sleep(MESSAGE_DRAIN_DELAY);
+}
+
+fn wait_for_enter() -> anyhow::Result<()> {
+    let mut line = String::new();
+    io::stdin()
+        .read_line(&mut line)
+        .with_context(|| "read Enter confirmation failed")?;
+    Ok(())
 }
 
 fn split_exec_command(command: &str) -> anyhow::Result<(String, Vec<String>)> {

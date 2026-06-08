@@ -51,6 +51,10 @@ pub struct Args {
     #[arg(long = "scripts-dir")]
     scripts_dir: Option<PathBuf>,
 
+    /// Keep spawned processes suspended after script load
+    #[arg(long = "no-resume", requires = "exec")]
+    no_resume: bool,
+
     /// Display help information
     #[arg(short, long, action = clap::ArgAction::Help)]
     pub help: Option<bool>,
@@ -116,6 +120,9 @@ impl Args {
 
     pub fn quiet(&self) -> bool {
         self.quiet
+    }
+    pub fn no_resume(&self) -> bool {
+        self.no_resume
     }
     pub fn target(self) -> Target {
         if let Some(exec) = self.exec {
