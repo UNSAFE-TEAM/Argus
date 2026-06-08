@@ -121,6 +121,12 @@ Load scripts from a local directory instead of embedded scripts:
 Argus.exe -e ".\target.exe" --scripts-dir .\scripts
 ```
 
+Spawn, print the PID, wait for debugger attach, then press Enter to inject and resume:
+
+```powershell
+Argus.exe -e ".\target.exe" --no-resume
+```
+
 ## Event Format
 
 Rules send events through the bootstrap runtime. The Rust side receives and
