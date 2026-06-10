@@ -13,6 +13,7 @@ async fn main() -> anyhow::Result<()> {
     let preset = args.presets();
     let module = args.module();
     let source = args.scripts_dir();
+    let follow_children = args.follow_children();
 
     // 消息隧道
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -23,12 +24,14 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // frida
-    let runner = frida::FridaRunner::new(args.target(), tx, preset, module, source);
+    let runner =
+        frida::FridaRunner::new(args.target(), tx, preset, module, source, follow_children);
     runner.run()?;
 
     Ok(())
 }
 
+#[cfg(windows)]
 fn enable_console_ansi() {
     use std::ffi::c_void;
 
@@ -63,3 +66,6 @@ fn enable_console_ansi() {
     enable(STD_OUTPUT_HANDLE);
     enable(STD_ERROR_HANDLE);
 }
+
+#[cfg(not(windows))]
+fn enable_console_ansi() {}

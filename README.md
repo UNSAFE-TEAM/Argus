@@ -36,6 +36,7 @@ VMware-based analysis environments.
 
 - Spawn a target process and attach before resume.
 - Attach to an existing process by PID.
+- Optionally follow child processes through the Python Frida bindings.
 - Load embedded scripts or a local scripts directory.
 - Emit structured events with the `argus.frida.v1` schema.
 - Prefer main-module call sites for `collect` and `triggered` event addresses.
@@ -100,7 +101,13 @@ Argus.exe -e ".\target.exe" -p vmware -m behavior
 Use JSONL output:
 
 ```powershell
-Argus.exe -e ".\target.exe" --output jsonl
+Argus.exe -e ".\\target.exe" --output jsonl
+```
+
+Follow child processes through the Python Frida helper:
+
+```powershell
+Argus.exe -e ".\\target.exe" --follow-children
 ```
 
 Save output to a file:
@@ -238,6 +245,10 @@ cargo build --release
 The Frida Rust bindings may download the matching Frida core devkit during build.
 If the download fails behind a proxy, configure Cargo/Git proxy settings or place
 the devkit where `frida-sys` can find it.
+
+If you use `--follow-children`, Argus also needs a Python interpreter with the
+`frida` package available. Override the interpreter path with `ARGUS_PYTHON`
+when `python` is not on `PATH`.
 
 ## Repository Layout
 

@@ -51,6 +51,10 @@ pub struct Args {
     #[arg(long = "scripts-dir")]
     scripts_dir: Option<PathBuf>,
 
+    /// Use the Python Frida helper to follow child processes
+    #[arg(long = "follow-children")]
+    follow_children: bool,
+
     /// Display help information
     #[arg(short, long, action = clap::ArgAction::Help)]
     pub help: Option<bool>,
@@ -116,6 +120,9 @@ impl Args {
 
     pub fn quiet(&self) -> bool {
         self.quiet
+    }
+    pub fn follow_children(&self) -> bool {
+        self.follow_children
     }
     pub fn target(self) -> Target {
         if let Some(exec) = self.exec {
